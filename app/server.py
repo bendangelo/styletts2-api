@@ -2,7 +2,8 @@ import time
 from io import BytesIO
 import base64
 import os
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, Security, HTTPException, Depends
+from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel, Field
 from typing import Optional
 import uvicorn
@@ -14,16 +15,34 @@ from pydub import AudioSegment
 from fastapi.responses import StreamingResponse
 import tempfile
 
+# Setup logging
 log_level = os.getenv("LOG_LEVEL", "INFO")
 log_level = log_level.upper()
 if log_level not in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
     log_level = "INFO"
 logging.basicConfig(level=getattr(logging, log_level))
 
+# Server configuration
 host = os.getenv("HOST", "*")
 port = os.getenv("PORT", "4321")
 port = int(port)
 
+# API Key configuration
+API_KEY = os.getenv("API_KEY")
+if not API_KEY:
+    raise ValueError("API_KEY environment variable must be set")
+
+api_key_header = APIKeyHeader(name="X-API-Key")
+
+async def get_api_key(api_key_header: str = Security(api_key_header)):
+    if api_key_header != API_KEY:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid API Key"
+        )
+    return api_key_header
+
+# Model initialization
 warmup_text = "This is an inference API for StyleTTS2. It is now warming up..."
 
 load_start = time.perf_counter()
@@ -94,7 +113,7 @@ def health_check():
 
 
 @app.post("/generate")
-def generate(request: TTSRequest, background_tasks: BackgroundTasks):
+def generate(request: TTSRequest, background_tasks: BackgroundTasks, api_key: str = Depends(get_api_key)):
     start = time.perf_counter()
     params = request.model_dump()
     output_format = params["output_format"]
